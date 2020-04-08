@@ -1,16 +1,23 @@
 package ali.naseem.ats;
 
+import android.content.Intent;
 import android.os.Bundle;
-import android.support.v7.app.AppCompatActivity;
-import android.support.v7.widget.DefaultItemAnimator;
-import android.support.v7.widget.DividerItemDecoration;
-import android.support.v7.widget.LinearLayoutManager;
-import android.support.v7.widget.RecyclerView;
 import android.text.TextUtils;
 import android.util.Patterns;
+import android.view.Menu;
+import android.view.MenuInflater;
+import android.view.MenuItem;
 import android.view.View;
 import android.widget.EditText;
 import android.widget.Toast;
+
+import androidx.annotation.NonNull;
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.appcompat.widget.Toolbar;
+import androidx.recyclerview.widget.DefaultItemAnimator;
+import androidx.recyclerview.widget.DividerItemDecoration;
+import androidx.recyclerview.widget.LinearLayoutManager;
+import androidx.recyclerview.widget.RecyclerView;
 
 import com.android.volley.AuthFailureError;
 import com.android.volley.Request;
@@ -19,10 +26,14 @@ import com.android.volley.Response;
 import com.android.volley.VolleyError;
 import com.android.volley.toolbox.StringRequest;
 import com.android.volley.toolbox.Volley;
+import com.google.android.gms.tasks.OnFailureListener;
+import com.google.android.gms.tasks.OnSuccessListener;
+import com.google.firebase.database.FirebaseDatabase;
 
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 
 public class MainActivity extends AppCompatActivity {
@@ -31,6 +42,8 @@ public class MainActivity extends AppCompatActivity {
     private ChalanAdapter adapter;
     private EditText registrationNumberEditText, nrcEditText, emailEditText;
     private View submitButton, loader;
+    private String nrc, email, number;
+    private StringBuffer sb;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -58,12 +71,17 @@ public class MainActivity extends AppCompatActivity {
                 handleSubmit();
             }
         });
+
+        Toolbar toolbar = findViewById(R.id.toolbar);
+        setSupportActionBar(toolbar);
+
+
     }
 
     private void handleSubmit() {
-        String nrc = nrcEditText.getText().toString().trim();
-        String email = emailEditText.getText().toString().trim();
-        String number = registrationNumberEditText.getText().toString().trim();
+        nrc = nrcEditText.getText().toString().trim();
+        email = emailEditText.getText().toString().trim();
+        number = registrationNumberEditText.getText().toString().trim();
         if (TextUtils.isEmpty(nrc)) {
             nrcEditText.setError("Cannot Be Blank");
             return;
@@ -79,12 +97,12 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        StringBuffer sb = new StringBuffer();
+        sb = new StringBuffer();
         int totalSelected = 0;
         double totalAmount = 0;
         for (Chalan chalan : chalans) {
             if (chalan.isSelected()) {
-                sb.append(String.format("%s = %s\n", chalan.getName(), "" + chalan.getCost()));
+                sb.append(String.format("%s = %s", chalan.getName(), "" + chalan.getCost()));
                 totalSelected++;
                 totalAmount += chalan.getCost();
             }
@@ -95,7 +113,7 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
         String ticketNumber = UUID.randomUUID().toString();
-        sb.append("\nTotal Amount = Rs." + totalAmount + "/- Payable for Ticket " + ticketNumber);
+        sb.append("\tTotal Amount = Rs." + totalAmount + "/- Payable for Ticket " + ticketNumber);
 //        Toast.makeText(this, sb.toString(), Toast.LENGTH_SHORT).show();
         sendMail(email, ticketNumber, sb.toString());
     }
@@ -104,18 +122,22 @@ public class MainActivity extends AppCompatActivity {
         submitButton.setVisibility(View.GONE);
         loader.setVisibility(View.VISIBLE);
         RequestQueue queue = Volley.newRequestQueue(this);
-        String url = "https://naseemali925.000webhostapp.com/send_mail.php";
+        String url = "https://supervenient-costs.000webhostapp.com/send_mail.php";
         StringRequest stringRequest = new StringRequest(Request.Method.POST, url,
                 new Response.Listener<String>() {
                     @Override
                     public void onResponse(String response) {
                         if (response.equals("success")) {
                             Toast.makeText(MainActivity.this, "Mail Sent Successfully.", Toast.LENGTH_SHORT).show();
+                            //after email is sent saving data in firebase
+                            saveToFirebase();
                         } else {
                             Toast.makeText(MainActivity.this, "Mail Could Not Be Sent", Toast.LENGTH_SHORT).show();
+                            submitButton.setVisibility(View.VISIBLE);
+                            loader.setVisibility(View.GONE);
                         }
-                        submitButton.setVisibility(View.VISIBLE);
-                        loader.setVisibility(View.GONE);
+//                        submitButton.setVisibility(View.VISIBLE);
+//                        loader.setVisibility(View.GONE);
                     }
                 }, new Response.ErrorListener() {
             @Override
@@ -165,4 +187,52 @@ public class MainActivity extends AppCompatActivity {
         chalans.add(new Chalan("Power of Officers to Impound Documents", 300));
         chalans.add(new Chalan("Offences Committed by Enforcing Officers", 200));
     }
+
+
+    //My commits
+    private void saveToFirebase() {
+
+        data dataObj = new data(nrc, email, number, sb.toString());
+        FirebaseDatabase database = FirebaseDatabase.getInstance();
+        String uniqueKey = database.getReference("Ats").push().getKey();
+        database.getReference("Ats")
+                .child(Objects.requireNonNull(uniqueKey))
+                .setValue(dataObj).addOnSuccessListener(new OnSuccessListener<Void>() {
+            @Override
+            public void onSuccess(Void aVoid) {
+                submitButton.setVisibility(View.VISIBLE);
+                loader.setVisibility(View.GONE);
+                Toast.makeText(MainActivity.this, "Data saved to firebase", Toast.LENGTH_LONG).show();
+            }
+        }).addOnFailureListener(new OnFailureListener() {
+            @Override
+            public void onFailure(@NonNull Exception e) {
+                submitButton.setVisibility(View.VISIBLE);
+                loader.setVisibility(View.GONE);
+                Toast.makeText(MainActivity.this, e.getMessage(), Toast.LENGTH_LONG).show();
+
+            }
+        });
+
+    }
+
+    @Override
+    public boolean onCreateOptionsMenu(Menu menu) {
+        MenuInflater inflater = getMenuInflater();
+        inflater.inflate(R.menu.mymenu, menu);
+        return true;
+
+    }
+
+    @Override
+    public boolean onOptionsItemSelected(MenuItem item) {
+        // Handle item selection
+        if (item.getItemId() == R.id.dataFrag)
+            startActivity(new Intent(this, RetrieveFromDB.class));
+        return super.onOptionsItemSelected(item);
+
+    }
+
+
 }
+
